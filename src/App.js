@@ -8,6 +8,7 @@ export default function App() {
   const [filtroAnio, setFiltroAnio] = useState("");
   const [filtroEquipo, setFiltroEquipo] = useState("");
   const [filtroJugador, setFiltroJugador] = useState("");
+  const [filtroTipoGol, setFiltroTipoGol] = useState(""); // <-- Nuevo estado
 
   useEffect(() => {
     const fetchDatosMaestros = async () => {
@@ -18,24 +19,19 @@ export default function App() {
         let todosLosGoles = [];
         let idCounter = 1;
 
-        // NUEVO MAPEO: Analizamos partido por partido para extraer los goles de los textos
+        // Analizamos partido por partido
         dataBruta.forEach((partido) => {
           const anio = partido.Year;
           const equipoLocal = partido.home_team;
           const equipoVisitante = partido.away_team;
 
-          // 1. Función para extraer goles de jugada (los que vienen entre corchetes y comillas)
           const procesarGolesJugada = (strGoles, equipo, rival) => {
             if (!strGoles || strGoles === '""') return;
-
-            // Usamos una expresión regular para sacar lo que está entre comillas simples '...'
             const regex = /'([^']+)'/g;
             let match;
-
             while ((match = regex.exec(strGoles)) !== null) {
               const partes = match[1].split("|");
               if (partes.length >= 3) {
-                // Limpiamos el texto raro de los minutos (ej: 36&rsquor; -> 36)
                 const minuto = partes[0].replace("&rsquor;", "");
                 const jugador = partes[2].trim();
 
@@ -52,15 +48,12 @@ export default function App() {
             }
           };
 
-          // 2. Función para extraer penales y goles en contra (los que vienen con el símbolo ·)
           const procesarGolesEspeciales = (strGoles, equipo, rival, tipo) => {
             if (!strGoles || strGoles === "") return;
-
             const golesSeparados = strGoles.split("|");
             golesSeparados.forEach((golStr) => {
               const partes = golStr.split(" · ");
               if (partes.length === 2) {
-                // Limpiamos las etiquetas (P) de penal u (OG) de en contra
                 const jugador = partes[0]
                   .replace(" (P)", "")
                   .replace(" (OG)", "")
@@ -80,7 +73,6 @@ export default function App() {
             });
           };
 
-          // Extraemos todos los goles del Local
           procesarGolesJugada(
             partido.home_goal_long,
             equipoLocal,
@@ -99,7 +91,6 @@ export default function App() {
             "En contra"
           );
 
-          // Extraemos todos los goles del Visitante
           procesarGolesJugada(
             partido.away_goal_long,
             equipoVisitante,
@@ -119,9 +110,7 @@ export default function App() {
           );
         });
 
-        // Ordenamos los goles por año (más recientes primero)
         todosLosGoles.sort((a, b) => b.anio - a.anio);
-
         setDatos(todosLosGoles);
         setCargando(false);
       } catch (error) {
@@ -133,26 +122,28 @@ export default function App() {
     fetchDatosMaestros();
   }, []);
 
+  // Extraemos opciones dinámicas para los menús desplegables
   const aniosDisponibles = [...new Set(datos.map((d) => d.anio))].sort(
     (a, b) => b - a
   );
   const equiposDisponibles = [...new Set(datos.map((d) => d.equipo))].sort();
+  const tiposDisponibles = [...new Set(datos.map((d) => d.detalle))].sort(); // <-- Nuevas opciones de tipo de gol
 
+  // Lógica de filtrado actualizada
   const eventosFiltrados = useMemo(() => {
     return datos.filter((evento) => {
       const matchAnio =
         filtroAnio === "" || parseInt(evento.anio) === parseInt(filtroAnio);
-      const matchEquipo =
-        filtroEquipo === "" ||
-        evento.equipo === filtroEquipo ||
-        evento.rival === filtroEquipo;
+      const matchEquipo = filtroEquipo === "" || evento.equipo === filtroEquipo;
       const matchJugador =
         filtroJugador === "" ||
         evento.jugador.toLowerCase().includes(filtroJugador.toLowerCase());
+      const matchTipoGol =
+        filtroTipoGol === "" || evento.detalle === filtroTipoGol; // <-- Filtro cruzado
 
-      return matchAnio && matchEquipo && matchJugador;
+      return matchAnio && matchEquipo && matchJugador && matchTipoGol;
     });
-  }, [datos, filtroAnio, filtroEquipo, filtroJugador]);
+  }, [datos, filtroAnio, filtroEquipo, filtroJugador, filtroTipoGol]);
 
   if (cargando) {
     return (
@@ -183,6 +174,7 @@ export default function App() {
     >
       <h2>🏆 Estadísticas Históricas del Mundial</h2>
 
+      {/* Contenedor de Filtros */}
       <div
         style={{
           display: "flex",
@@ -227,7 +219,7 @@ export default function App() {
               marginBottom: "5px",
             }}
           >
-            Equipo o Rival:
+            Equipo Anotador:
           </label>
           <select
             value={filtroEquipo}
@@ -238,6 +230,31 @@ export default function App() {
             {equiposDisponibles.map((equipo) => (
               <option key={equipo} value={equipo}>
                 {equipo}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Nuevo menú desplegable para Tipo de Gol */}
+        <div>
+          <label
+            style={{
+              display: "block",
+              fontWeight: "bold",
+              marginBottom: "5px",
+            }}
+          >
+            Tipo de Gol:
+          </label>
+          <select
+            value={filtroTipoGol}
+            onChange={(e) => setFiltroTipoGol(e.target.value)}
+            style={{ padding: "8px", borderRadius: "4px" }}
+          >
+            <option value="">Todos</option>
+            {tiposDisponibles.map((tipo) => (
+              <option key={tipo} value={tipo}>
+                {tipo}
               </option>
             ))}
           </select>
@@ -272,6 +289,7 @@ export default function App() {
               setFiltroAnio("");
               setFiltroEquipo("");
               setFiltroJugador("");
+              setFiltroTipoGol("");
             }}
             style={{
               padding: "8px 12px",
@@ -328,7 +346,7 @@ export default function App() {
             >
               <th style={{ padding: "12px" }}>Año</th>
               <th style={{ padding: "12px" }}>Jugador</th>
-              <th style={{ padding: "12px" }}>País</th>
+              <th style={{ padding: "12px" }}>País Anotador</th>
               <th style={{ padding: "12px" }}>Rival</th>
               <th style={{ padding: "12px" }}>Minuto</th>
               <th style={{ padding: "12px" }}>Tipo</th>
