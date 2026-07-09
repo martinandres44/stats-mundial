@@ -12,31 +12,120 @@ export default function App() {
   useEffect(() => {
     const fetchDatosMaestros = async () => {
       try {
-        // Lee el archivo directamente desde la carpeta "public"
         const respuesta = await fetch("/data-mundiales.json");
         const dataBruta = await respuesta.json();
 
-        // MAPEO DE DATOS:
-        // Acá adaptamos los nombres de las columnas de tu JSON a los que usa la app.
-        // Cambiá "item.Year", "item.Goalscorer", etc., según cómo se llamen en tu archivo.
-        const dataFormateada = dataBruta.map((item, index) => ({
-          id: index,
-          anio: item.Year || item.anio || item.year,
-          jugador:
-            item.Goalscorer || item.Player || item.jugador || "Desconocido",
-          equipo: item.Team || item.equipo || "Desconocido",
-          rival: item.Opponent || item.rival || "-",
-          minuto: item.Minute || item.minuto || "-",
-          detalle: item.Action || item.Type || item.detalle || "Gol",
-        }));
+        let todosLosGoles = [];
+        let idCounter = 1;
 
-        // Filtramos aquellos registros que no tengan un año válido por las dudas
-        const dataLimpia = dataFormateada.filter((d) => d.anio);
+        // NUEVO MAPEO: Analizamos partido por partido para extraer los goles de los textos
+        dataBruta.forEach((partido) => {
+          const anio = partido.Year;
+          const equipoLocal = partido.home_team;
+          const equipoVisitante = partido.away_team;
 
-        setDatos(dataLimpia);
+          // 1. Función para extraer goles de jugada (los que vienen entre corchetes y comillas)
+          const procesarGolesJugada = (strGoles, equipo, rival) => {
+            if (!strGoles || strGoles === '""') return;
+
+            // Usamos una expresión regular para sacar lo que está entre comillas simples '...'
+            const regex = /'([^']+)'/g;
+            let match;
+
+            while ((match = regex.exec(strGoles)) !== null) {
+              const partes = match[1].split("|");
+              if (partes.length >= 3) {
+                // Limpiamos el texto raro de los minutos (ej: 36&rsquor; -> 36)
+                const minuto = partes[0].replace("&rsquor;", "");
+                const jugador = partes[2].trim();
+
+                todosLosGoles.push({
+                  id: idCounter++,
+                  anio: anio,
+                  jugador: jugador,
+                  equipo: equipo,
+                  rival: rival,
+                  minuto: minuto,
+                  detalle: "Jugada",
+                });
+              }
+            }
+          };
+
+          // 2. Función para extraer penales y goles en contra (los que vienen con el símbolo ·)
+          const procesarGolesEspeciales = (strGoles, equipo, rival, tipo) => {
+            if (!strGoles || strGoles === "") return;
+
+            const golesSeparados = strGoles.split("|");
+            golesSeparados.forEach((golStr) => {
+              const partes = golStr.split(" · ");
+              if (partes.length === 2) {
+                // Limpiamos las etiquetas (P) de penal u (OG) de en contra
+                const jugador = partes[0]
+                  .replace(" (P)", "")
+                  .replace(" (OG)", "")
+                  .trim();
+                const minuto = partes[1].trim();
+
+                todosLosGoles.push({
+                  id: idCounter++,
+                  anio: anio,
+                  jugador: jugador,
+                  equipo: equipo,
+                  rival: rival,
+                  minuto: minuto,
+                  detalle: tipo,
+                });
+              }
+            });
+          };
+
+          // Extraemos todos los goles del Local
+          procesarGolesJugada(
+            partido.home_goal_long,
+            equipoLocal,
+            equipoVisitante
+          );
+          procesarGolesEspeciales(
+            partido.home_penalty_goal,
+            equipoLocal,
+            equipoVisitante,
+            "Penal"
+          );
+          procesarGolesEspeciales(
+            partido.home_own_goal,
+            equipoLocal,
+            equipoVisitante,
+            "En contra"
+          );
+
+          // Extraemos todos los goles del Visitante
+          procesarGolesJugada(
+            partido.away_goal_long,
+            equipoVisitante,
+            equipoLocal
+          );
+          procesarGolesEspeciales(
+            partido.away_penalty_goal,
+            equipoVisitante,
+            equipoLocal,
+            "Penal"
+          );
+          procesarGolesEspeciales(
+            partido.away_own_goal,
+            equipoVisitante,
+            equipoLocal,
+            "En contra"
+          );
+        });
+
+        // Ordenamos los goles por año (más recientes primero)
+        todosLosGoles.sort((a, b) => b.anio - a.anio);
+
+        setDatos(todosLosGoles);
         setCargando(false);
       } catch (error) {
-        console.error("Error cargando la base de datos local:", error);
+        console.error("Error cargando o procesando la base de datos:", error);
         setCargando(false);
       }
     };
@@ -44,13 +133,11 @@ export default function App() {
     fetchDatosMaestros();
   }, []);
 
-  // Extraemos dinámicamente qué equipos y años existen en tu nueva base
   const aniosDisponibles = [...new Set(datos.map((d) => d.anio))].sort(
     (a, b) => b - a
   );
   const equiposDisponibles = [...new Set(datos.map((d) => d.equipo))].sort();
 
-  // Lógica de filtrado en tiempo real
   const eventosFiltrados = useMemo(() => {
     return datos.filter((evento) => {
       const matchAnio =
@@ -80,9 +167,7 @@ export default function App() {
           backgroundColor: "#f4f6f9",
         }}
       >
-        <h2 style={{ color: "#007bff" }}>
-          ⏳ Cargando base de datos maestra...
-        </h2>
+        <h2 style={{ color: "#007bff" }}>⏳ Procesando partidos...</h2>
       </div>
     );
   }
@@ -98,7 +183,6 @@ export default function App() {
     >
       <h2>🏆 Estadísticas Históricas del Mundial</h2>
 
-      {/* Contenedor de Filtros */}
       <div
         style={{
           display: "flex",
@@ -171,7 +255,7 @@ export default function App() {
           </label>
           <input
             type="text"
-            placeholder="Ej: Messi, Pelé, Klose..."
+            placeholder="Ej: Messi, Mbappé..."
             value={filtroJugador}
             onChange={(e) => setFiltroJugador(e.target.value)}
             style={{
@@ -214,7 +298,7 @@ export default function App() {
         }}
       >
         <h3 style={{ margin: 0 }}>
-          Registros encontrados: {eventosFiltrados.length}
+          Goles encontrados: {eventosFiltrados.length}
         </h3>
       </div>
 
@@ -247,7 +331,7 @@ export default function App() {
               <th style={{ padding: "12px" }}>País</th>
               <th style={{ padding: "12px" }}>Rival</th>
               <th style={{ padding: "12px" }}>Minuto</th>
-              <th style={{ padding: "12px" }}>Detalle</th>
+              <th style={{ padding: "12px" }}>Tipo</th>
             </tr>
           </thead>
           <tbody>
@@ -267,8 +351,13 @@ export default function App() {
                   <td style={{ padding: "12px" }}>
                     <span
                       style={{
-                        backgroundColor: "#17a2b8",
-                        color: "#fff",
+                        backgroundColor:
+                          evento.detalle === "Penal"
+                            ? "#ffc107"
+                            : evento.detalle === "En contra"
+                            ? "#dc3545"
+                            : "#17a2b8",
+                        color: evento.detalle === "Penal" ? "#000" : "#fff",
                         padding: "3px 8px",
                         borderRadius: "4px",
                         fontSize: "12px",
